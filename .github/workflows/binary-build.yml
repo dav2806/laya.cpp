@@ -18,7 +18,6 @@ on:
         description: Build and validate one Linux binary
         type: choice
         required: true
-        # Adicionado opções específicas para ARM64
         options: [linux-vulkan, linux-cuda12, linux-cuda13, linux-arm64-vulkan, linux-arm64-cuda12, linux-arm64-cuda13]
       commit:
         description: Source commit; empty uses main
@@ -37,6 +36,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     env:
+      RELEASE_TARGET: ${{ inputs.target }}
       RELEASE_TAG: ${{ inputs.tag || 'r0000' }}
       RELEASE_COMMIT: ${{ inputs.commit || github.sha }}
       RELEASE_BACKEND: ${{ contains(inputs.target, '-cuda') && 'cuda' || 'vulkan' }}
@@ -70,7 +70,6 @@ jobs:
             echo "Configuring multiarch dependencies for ARM64 cross-compilation..."
             sudo dpkg --add-architecture arm64
             sudo apt-get update
-            # Instala o compilador cruzado e as dependências alvo para a arquitetura arm64
             sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
               libicu-dev:arm64 nlohmann-json3-dev:arm64 libvulkan-dev:arm64
           else
@@ -98,23 +97,12 @@ jobs:
 
       - name: Configure CMake
         if: steps.executable-cache.outputs.cache-hit != 'true'
-        env:
-          RELEASE_BACKEND: ${{ contains(inputs.target, '-cuda') && 'cuda' || 'vulkan' }}
-        run: |
-          # Se o alvo for ARM64, injeta as flags de compilação cruzada no script/ambiente
-          if [[ "${{ inputs.target }}" == *"arm64"* ]]; then
-            export CMAKE_ARGS="-DCMAKE_SYSTEM_NAME=Linux -DCMAKE_SYSTEM_PROCESSOR=aarch64 -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++"
-            echo "Injected ARM64 cross-compile flags."
-          fi
-          
-          # Executa o seu script original passando as variáveis necessárias
-          python scripts/release/build.py configure $CMAKE_ARGS
+        run: python scripts/release/build.py configure
 
       - name: Build
         if: steps.executable-cache.outputs.cache-hit != 'true'
         run: cmake --build build-release --config Release --parallel 3
 
-      # Passos de testes nativos são ignorados em compilação cruzada (pois falhariam ao executar ARM64 em x86_64)
       - name: Host tests
         if: steps.executable-cache.outputs.cache-hit != 'true' && !contains(inputs.target, 'arm64')
         run: ctest --test-dir build-release -C Release --output-on-failure --no-tests=error -R "^(decision|http|vulkan-spirv|vulkan-bf16-range)$"
@@ -138,6 +126,5 @@ jobs:
           RELEASE_SYSTEM: 'linux'
           RELEASE_SDK: '1.4.357.1'
         run: |
-          echo "Auditing and staging final binary for ${{ inputs.target }}..."
-          # Adicione o comando restante do seu script original aqui caso necessário
+          echo "Staging final binary for ${{ inputs.target }}..."
           
