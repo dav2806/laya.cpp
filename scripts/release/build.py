@@ -11,6 +11,10 @@ ROOT = Path(__file__).resolve().parents[2]
 WINDOWS = sys.platform == 'win32'
 BACKEND = os.environ['RELEASE_BACKEND']
 CUDA_PROFILE = os.environ.get('RELEASE_CUDA_PROFILE') or None
+# Lê a arquitetura desejada a partir do target informado pelo CI
+TARGET = os.environ.get('RELEASE_TARGET', '')
+IS_ARM64 = 'arm64' in TARGET
+
 BUILD = ROOT / 'build-release'
 
 
@@ -22,9 +26,20 @@ def configure():
     options = ['-DLAYA_PORTABLE=ON', '-DCMAKE_BUILD_TYPE=Release',
                f'-DLAYA_CUDA={"ON" if BACKEND == "cuda" else "OFF"}',
                f'-DLAYA_VULKAN={"ON" if BACKEND == "vulkan" else "OFF"}']
+    
+    # Injeta flags de compilação cruzada para Linux ARM64
+    if IS_ARM64 and not WINDOWS and sys.platform != 'darwin':
+        options += [
+            '-DCMAKE_SYSTEM_NAME=Linux',
+            '-DCMAKE_SYSTEM_PROCESSOR=aarch64',
+            '-DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc',
+            '-DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++'
+        ]
+
     if WINDOWS:
         options += [f'-DCMAKE_TOOLCHAIN_FILE={ROOT / "release-vcpkg/scripts/buildsystems/vcpkg.cmake"}',
                     '-DVCPKG_TARGET_TRIPLET=x64-windows-static']
+                    
     if BACKEND == 'cuda':
         if CUDA_PROFILE not in CUDA_PROFILES:
             raise ValueError('RELEASE_CUDA_PROFILE must be 12 or 13 for CUDA builds')
@@ -38,19 +53,22 @@ def configure():
         options += [f'-DCMAKE_CUDA_ARCHITECTURES={profile["architectures"]}',
                     f'-DCMAKE_CUDA_COMPILER={compiler}', f'-DCUDAToolkit_ROOT={toolkit}',
                     '-DCMAKE_CUDA_FLAGS=-t 2']
+                    
     if BACKEND == 'vulkan':
         options += [f'-DCMAKE_PREFIX_PATH={os.environ["VULKAN_SDK"]}']
+        
     if BACKEND == 'coreml':
         icu = subprocess.check_output(['brew', '--prefix', 'icu4c@78'], text=True).strip()
         json_prefix = subprocess.check_output(['brew', '--prefix', 'nlohmann-json'], text=True).strip()
         options += ['-DLAYA_COREML=ON', '-DCMAKE_OSX_ARCHITECTURES=arm64',
                     '-DCMAKE_OSX_DEPLOYMENT_TARGET=15.0',
                     f'-DCMAKE_PREFIX_PATH={icu};{json_prefix}']
+                    
     run('cmake', '-S', ROOT, '-B', BUILD, '-G', 'Ninja', *options)
-
 
 
 if __name__ == "__main__":
     if sys.argv[1:] != ["configure"]:
         raise SystemExit("usage: build.py configure")
     configure()
+    
